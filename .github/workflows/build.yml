@@ -1,0 +1,53 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [spout, ci/**]
+    paths-ignore: ['**.md']
+
+jobs:
+  build-win64:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Cache only the downloaded CEF archive. The extracted tree is patched in place
+      # by the generate script, so it is re-extracted and re-patched on every run.
+      - name: Cache CEF binary download
+        uses: actions/cache@v4
+        with:
+          path: _cef_binary/*.tar.bz2
+          key: cef-${{ runner.os }}-${{ hashFiles('_SpoutBrowser_generate_solution.bat') }}
+
+      - name: Generate solution
+        shell: cmd
+        run: call _SpoutBrowser_generate_solution.bat
+
+      - name: Build cefclient
+        shell: pwsh
+        run: |
+          $build = (Get-ChildItem _cef_binary -Directory -Filter 'cef_binary_*').FullName + '\build'
+          "BUILD_DIR=$build" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          cmake --build $build --config Release --target cefclient --parallel
+
+      - name: Stage output without .pdb
+        shell: pwsh
+        run: |
+          $src = Join-Path $env:BUILD_DIR 'tests\cefclient\Release'
+          $dst = 'SpoutBrowser-win64'
+          New-Item -ItemType Directory -Path $dst | Out-Null
+          robocopy $src $dst /E /XF *.pdb /NFL /NDL /NJH /NJS
+          if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE }
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpoutBrowser-win64
+          path: SpoutBrowser-win64
+          if-no-files-found: error
