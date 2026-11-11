@@ -54,6 +54,7 @@ class OsrRenderHandlerWin {
     return settings_.external_begin_frame_enabled;
   }
   HWND hwnd() const { return hwnd_; }
+  const OsrRendererSettings& settings() const { return settings_; }
 
  protected:
   // Called to trigger the BeginFrame timer.

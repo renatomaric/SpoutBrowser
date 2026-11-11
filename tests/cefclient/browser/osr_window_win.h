@@ -195,6 +195,14 @@ class OsrWindowWin
 
   bool hidden_ = false;
 
+  // SpoutBrowser: true when --width and/or --height fix the view size.
+  bool IsFixedSize() const {
+    return settings_.fixed_width > 0 || settings_.fixed_height > 0;
+  }
+  // SpoutBrowser: tells the browser that the view rect changed and forces a
+  // repaint, so the Spout sender is updated even when the page is static.
+  void NotifyViewRectChanged();
+
   // Mouse state tracking.
   POINT last_mouse_pos_;
   POINT current_mouse_pos_;

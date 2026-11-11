@@ -212,6 +212,11 @@ void MainContextImpl::PopulateSettings(CefSettings* settings) {
       sCachePath = GetAppWorkingDirectory() + "cache";
   }
 
+  // SpoutBrowser: one browser profile (and one process singleton) per cache
+  // path, so instances with different --cache-path run independently and never
+  // hand their command line to an already running instance.
+  CefString(&settings->root_cache_path) = sCachePath.ToString();
+
 
   if (use_windowless_rendering_) {
     settings->windowless_rendering_enabled = true;
@@ -267,6 +272,23 @@ void MainContextImpl::PopulateOsrSettings(OsrRendererSettings* settings) {
   settings->shared_texture_enabled = shared_texture_enabled_;
   settings->external_begin_frame_enabled = external_begin_frame_enabled_;
   settings->begin_frame_rate = windowless_frame_rate_;
+
+  // SpoutBrowser: fixed view size and Spout sender name.
+  // Invalid values were already rejected at startup (see cefclient_win.cc).
+  if (command_line_->HasSwitch(switches::kWidth)) {
+    settings->fixed_width = std::max(
+        0, atoi(command_line_->GetSwitchValue(switches::kWidth)
+                    .ToString()
+                    .c_str()));
+  }
+  if (command_line_->HasSwitch(switches::kHeight)) {
+    settings->fixed_height = std::max(
+        0, atoi(command_line_->GetSwitchValue(switches::kHeight)
+                    .ToString()
+                    .c_str()));
+  }
+  settings->spout_sender_name =
+      command_line_->GetSwitchValue(switches::kSpoutSenderName).ToString();
 
   if (browser_background_color_ != 0) {
     settings->background_color = browser_background_color_;

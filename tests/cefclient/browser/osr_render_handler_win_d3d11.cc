@@ -80,7 +80,7 @@ void PopupLayer::set_bounds(const CefRect& bounds) {
 OsrRenderHandlerWinD3D11::OsrRenderHandlerWinD3D11(
     const OsrRendererSettings& settings,
     HWND hwnd)
-    : OsrRenderHandlerWin(settings, hwnd) {}
+    : OsrRenderHandlerWin(settings, hwnd), keepalive_factory_(this) {}
 
 bool OsrRenderHandlerWinD3D11::Initialize(CefRefPtr<CefBrowser> browser,
                                           int width,
@@ -115,11 +115,23 @@ bool OsrRenderHandlerWinD3D11::Initialize(CefRefPtr<CefBrowser> browser,
 
   // SpoutBrowser:
   spout_sender_ = std::make_shared<spout::TextureSender>();
-  spout_sender_->Initialize((ID3D11Device*)(*device_));
+  spout_sender_->Initialize((ID3D11Device*)(*device_),
+                            settings().spout_sender_name);
 
 
 
   start_time_ = GetTimeNow();
+
+  // SpoutBrowser: keep sending frames at the configured rate.
+  {
+    const int fps = settings().begin_frame_rate > 0 ? settings().begin_frame_rate : 30;
+    const float delay_us = static_cast<float>(1000000.0 / fps);
+    CefPostDelayedTask(
+        TID_UI,
+        base::BindOnce(&OsrRenderHandlerWinD3D11::KeepAliveTick,
+                       keepalive_factory_.GetWeakPtr(), delay_us),
+        static_cast<int64_t>(delay_us / 1000.0));
+  }
 
   SetBrowser(browser);
   return true;
@@ -204,12 +216,30 @@ void OsrRenderHandlerWinD3D11::OnAcceleratedPaint(
     popup_layer_->on_paint(info.shared_texture_handle);
   } else {
     browser_layer_->on_paint(info.shared_texture_handle);
+    has_frame_ = true;  // SpoutBrowser
   }
 
   Render();
 }
 
+void OsrRenderHandlerWinD3D11::KeepAliveTick(float delay_us) {
+  CEF_REQUIRE_UI_THREAD();
+
+  // Re-send the last frame if nothing was rendered during the last interval.
+  // Half an interval of slack absorbs timer jitter.
+  if (has_frame_ && (GetTimeNow() - last_render_us_) >= delay_us * 0.5f) {
+    Render();
+  }
+
+  CefPostDelayedTask(
+      TID_UI,
+      base::BindOnce(&OsrRenderHandlerWinD3D11::KeepAliveTick,
+                     keepalive_factory_.GetWeakPtr(), delay_us),
+      static_cast<int64_t>(delay_us / 1000.0));
+}
+
 void OsrRenderHandlerWinD3D11::Render() {
+  last_render_us_ = GetTimeNow();  // SpoutBrowser
   // Update composition + layers based on time.
   const auto t = (GetTimeNow() - start_time_) / 1000000.0;
   composition_->tick(t);

@@ -58,6 +58,12 @@ extern const char kShowOverlayBrowser[];
 extern const char kUseAngle[];
 extern const char kOzonePlatform[];
 
+// SpoutBrowser:
+extern const char kSpoutSenderName[];
+extern const char kWidth[];
+extern const char kHeight[];
+extern const char kHelp[];
+
 }  // namespace client::switches
 
 #endif  // CEF_TESTS_SHARED_SHARED_COMMON_SWITCHES_H_

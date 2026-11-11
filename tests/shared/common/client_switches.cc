@@ -64,4 +64,10 @@ const char kShowOverlayBrowser[] = "show-overlay-browser";
 const char kUseAngle[] = "use-angle";
 const char kOzonePlatform[] = "ozone-platform";
 
+// SpoutBrowser:
+const char kSpoutSenderName[] = "spout-sender-name";
+const char kWidth[] = "width";
+const char kHeight[] = "height";
+const char kHelp[] = "help";
+
 }  // namespace client::switches

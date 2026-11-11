@@ -5,7 +5,9 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
+#include <string>
 
 #include "include/cef_command_line.h"
 #include "include/cef_sandbox_win.h"
@@ -17,6 +19,7 @@
 #include "tests/cefclient/browser/resource.h"
 #include "tests/cefclient/browser/root_window_manager.h"
 #include "tests/cefclient/browser/test_runner.h"
+#include "tests/cefclient/spout_browser/SpoutBrowser_TextureSender.h"
 #include "tests/shared/browser/client_app_browser.h"
 #include "tests/shared/browser/main_message_loop_external_pump.h"
 #include "tests/shared/browser/main_message_loop_std.h"
@@ -113,6 +116,156 @@ bool VerifyCodeSigningAndLoad(CefScopedLibraryLoader& library_loader,
                                          kAllowUnsigned, version_info);
 }
 
+
+// SpoutBrowser: text printed by --help. Keep in sync with client_switches.cc.
+const char kHelpText[] =
+    "SpoutBrowser: renders a web page off-screen and sends it as a Spout texture.\n"
+    "\n"
+    "Usage: SpoutBrowser.exe [--switch[=value]]...\n"
+    "\n"
+    "SpoutBrowser switches:\n"
+    "  --help                          Print this list and exit.\n"
+    "  --url=<url>                     Page to load.\n"
+    "  --spout-sender-name=<name>      Spout sender name (UTF-8, max 255 bytes).\n"
+    "                                  Default: SpoutBrowser. If the name is already\n"
+    "                                  in use the process logs to debug.log and exits\n"
+    "                                  with code 3.\n"
+    "  --width=<px>                    Fixed render and Spout texture width.\n"
+    "  --height=<px>                   Fixed render and Spout texture height.\n"
+    "                                  Both ignore window size, position, minimized\n"
+    "                                  state and DPI (device scale factor 1).\n"
+    "                                  Without them the window size is used.\n"
+    "  --off-screen-frame-rate=<fps>   Frame rate (default 30). The last frame is\n"
+    "                                  re-sent at this rate on static pages.\n"
+    "  --transparent-painting-enabled  Transparent background (alpha 0).\n"
+    "  --cache-path=<dir>              Browser profile directory (default: cache\n"
+    "                                  next to the exe). Use a different one per\n"
+    "                                  instance to run several instances.\n"
+    "  --multi-threaded-message-loop   Run the browser on its own UI thread.\n"
+    "  --hide-controls                 Hide the URL bar and navigation buttons.\n"
+    "\n"
+    "Other cefclient switches:\n"
+    "  --external-message-pump         Use the external message pump.\n"
+    "  --off-screen-rendering-enabled  Always on in SpoutBrowser.\n"
+    "  --shared-texture-enabled        Always on in SpoutBrowser.\n"
+    "  --external-begin-frame-enabled  Drive frames with SendExternalBeginFrame.\n"
+    "  --show-update-rect              Draw a border around updated areas.\n"
+    "  --fake-screen-bounds            Report the view as the screen bounds.\n"
+    "  --mouse-cursor-change-disabled  Do not change the mouse cursor.\n"
+    "  --offline                       Start with the network disabled.\n"
+    "  --filter-chrome-commands        Filter Chrome commands.\n"
+    "  --request-context-per-browser   One request context per browser.\n"
+    "  --request-context-shared-cache  Share the cache between request contexts.\n"
+    "  --background-color=<color>      Browser background color.\n"
+    "  --enable-gpu                    Enable the GPU.\n"
+    "  --filter-url=<url>              Filter requests by URL.\n"
+    "  --use-views                     Use the Views framework (not with OSR).\n"
+    "  --use-native                    Use native windows.\n"
+    "  --hide-frame                    Hide the window frame.\n"
+    "  --hide-overlays                 Hide overlays.\n"
+    "  --always-on-top                 Keep the window on top.\n"
+    "  --hide-top-menu                 Hide the top menu.\n"
+    "  --ssl-client-certificate=<x>    SSL client certificate.\n"
+    "  --crl-sets-path=<path>          CRL sets path.\n"
+    "  --no-activate                   Do not activate the window on creation.\n"
+    "  --show-chrome-toolbar           Show the Chrome toolbar.\n"
+    "  --initial-show-state=<state>    Initial window state (normal, minimized,\n"
+    "                                  maximized).\n"
+    "  --use-default-popup             Use the default popup window.\n"
+    "  --use-client-dialogs            Use client dialogs.\n"
+    "  --use-test-http-server          Use the test HTTP server.\n"
+    "  --show-window-buttons           Show window buttons.\n"
+    "  --use-window-modal-dialog       Use window modal dialogs.\n"
+    "  --use-bottom-controls           Put the controls at the bottom.\n"
+    "  --hide-pip-frame                Hide the Picture-in-Picture frame.\n"
+    "  --move-pip-enabled              Allow moving the Picture-in-Picture window.\n"
+    "  --hide-chrome-bubbles           Hide Chrome bubbles.\n"
+    "  --hide-window-on-close          Hide the window instead of closing it.\n"
+    "  --accepts-first-mouse           Accept the first mouse click.\n"
+    "  --use-alloy-style               Use Alloy style.\n"
+    "  --use-chrome-style-window       Use a Chrome style window.\n"
+    "  --show-overlay-browser          Show the overlay browser.\n"
+    "  --use-angle=<backend>           ANGLE backend.\n"
+    "  --ozone-platform=<name>         Ozone platform.\n"
+    "\n"
+    "Any Chromium switch is accepted as well.\n"
+    "Exit codes: 0 ok, 2 invalid flag value, 3 Spout sender name already in use.\n";
+
+// SpoutBrowser: the exe has the GUI subsystem, so attach to the console of the
+// parent (e.g. PowerShell) to make the text visible. When stdout is redirected
+// the text goes there instead.
+void PrintHelp() {
+  ::AttachConsole(ATTACH_PARENT_PROCESS);
+
+  HANDLE out = ::GetStdHandle(STD_OUTPUT_HANDLE);
+  if (!out || out == INVALID_HANDLE_VALUE) {
+    out = ::CreateFileW(L"CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr,
+                        OPEN_EXISTING, 0, nullptr);
+  }
+  if (!out || out == INVALID_HANDLE_VALUE) {
+    return;
+  }
+
+  std::string text;
+  for (const char* c = kHelpText; *c; ++c) {
+    if (*c == '\n') {
+      text += '\r';
+    }
+    text += *c;
+  }
+  DWORD written = 0;
+  ::WriteFile(out, text.data(), static_cast<DWORD>(text.size()), &written,
+              nullptr);
+}
+
+// SpoutBrowser: parses a pixel size switch. Exits with an error on bad values.
+void ValidateSizeSwitch(CefRefPtr<CefCommandLine> command_line,
+                        const char* name) {
+  if (!command_line->HasSwitch(name)) {
+    return;
+  }
+  const std::string value = command_line->GetSwitchValue(name).ToString();
+  char* end = nullptr;
+  const long px = value.empty() ? 0 : std::strtol(value.c_str(), &end, 10);
+  if (value.empty() || *end != '\0' || px < 1 || px > 16384) {
+    spout::FailFast(std::string("--") + name + "=\"" + value +
+                        "\" is not a size between 1 and 16384",
+                    spout::kExitBadArguments);
+  }
+}
+
+// SpoutBrowser: handles --help and validates the new flags in the browser
+// process before CEF starts. Returns true when the process should exit.
+bool HandleSpoutBrowserSwitches(CefRefPtr<CefCommandLine> command_line,
+                                int* exit_code) {
+  if (command_line->HasSwitch(switches::kHelp)) {
+    PrintHelp();
+    *exit_code = 0;
+    return true;
+  }
+
+  ValidateSizeSwitch(command_line, switches::kWidth);
+  ValidateSizeSwitch(command_line, switches::kHeight);
+
+  if (command_line->HasSwitch(switches::kSpoutSenderName)) {
+    const std::string name =
+        command_line->GetSwitchValue(switches::kSpoutSenderName).ToString();
+    if (name.empty()) {
+      spout::FailFast("--spout-sender-name must not be empty",
+                      spout::kExitBadArguments);
+    }
+    if (name.size() > spout::kMaxSenderNameBytes) {
+      spout::FailFast("--spout-sender-name is longer than 255 bytes",
+                      spout::kExitBadArguments);
+    }
+    if (spout::IsSenderNameInUse(name)) {
+      spout::FailFast("Spout sender name \"" + name + "\" is already in use",
+                      spout::kExitSenderNameInUse);
+    }
+  }
+  return false;
+}
+
 int RunMain(HINSTANCE hInstance,
             int nCmdShow,
             void* sandbox_info,
@@ -147,6 +300,11 @@ int RunMain(HINSTANCE hInstance,
   // Execute the secondary process, if any.
   int exit_code = CefExecuteProcess(main_args, app, sandbox_info);
   if (exit_code >= 0) {
+    return exit_code;
+  }
+
+  // SpoutBrowser: --help and flag validation (browser process only).
+  if (HandleSpoutBrowserSwitches(command_line, &exit_code)) {
     return exit_code;
   }
 

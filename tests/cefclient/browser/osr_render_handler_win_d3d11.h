@@ -78,6 +78,10 @@ class OsrRenderHandlerWinD3D11 : public OsrRenderHandlerWin {
  private:
   void Render() override;
 
+  // SpoutBrowser: re-sends the last frame when the page does not paint, so the
+  // Spout sender stays active (and keeps the right size) on static pages.
+  void KeepAliveTick(float delay_us);
+
   uint64_t start_time_ = 0;
   std::shared_ptr<d3d11::Device> device_;
   std::shared_ptr<d3d11::SwapChain> swap_chain_;
@@ -88,6 +92,9 @@ class OsrRenderHandlerWinD3D11 : public OsrRenderHandlerWin {
 
   // SpoutBrowser:
   std::shared_ptr<spout::TextureSender> spout_sender_;
+  bool has_frame_ = false;
+  uint64_t last_render_us_ = 0;
+  base::WeakPtrFactory<OsrRenderHandlerWinD3D11> keepalive_factory_;
 
 
   DISALLOW_COPY_AND_ASSIGN(OsrRenderHandlerWinD3D11);

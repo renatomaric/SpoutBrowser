@@ -6,6 +6,8 @@
 #define CEF_TESTS_CEFCLIENT_BROWSER_OSR_RENDERER_SETTINGS_H_
 #pragma once
 
+#include <string>
+
 #include "include/internal/cef_types.h"
 
 namespace client {
@@ -34,6 +36,15 @@ struct OsrRendererSettings {
   // CefBrowserHost::SendExternalBeginFrame at the specified frame rate.
   bool external_begin_frame_enabled = false;
   int begin_frame_rate = 0;
+
+  // SpoutBrowser: fixed view size in pixels (0 = follow the window size).
+  // When set, the view rect and the Spout texture have exactly this size,
+  // regardless of window size, position, minimized state and DPI.
+  int fixed_width = 0;
+  int fixed_height = 0;
+
+  // SpoutBrowser: Spout sender name (UTF-8). Empty = default ("SpoutBrowser").
+  std::string spout_sender_name;
 };
 
 }  // namespace client

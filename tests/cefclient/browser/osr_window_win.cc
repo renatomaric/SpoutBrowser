@@ -185,6 +185,17 @@ void OsrWindowWin::Show() {
 
   // Give focus to the browser.
   browser_->GetHost()->SetFocus(true);
+
+  // SpoutBrowser: make sure the first frame has the right size.
+  NotifyViewRectChanged();
+}
+
+void OsrWindowWin::NotifyViewRectChanged() {
+  if (!browser_) {
+    return;
+  }
+  browser_->GetHost()->WasResized();
+  browser_->GetHost()->Invalidate(PET_VIEW);
 }
 
 void OsrWindowWin::Hide() {
@@ -201,7 +212,9 @@ void OsrWindowWin::Hide() {
   // Remove focus from the browser.
   browser_->GetHost()->SetFocus(false);
 
-  if (!hidden_) {
+  // SpoutBrowser: with a fixed view size the output must keep running while
+  // the window is minimized, so the browser is never marked hidden.
+  if (!hidden_ && !IsFixedSize()) {
     // Set the browser as hidden.
     browser_->GetHost()->WasHidden(true);
     hidden_ = true;
@@ -244,6 +257,11 @@ void OsrWindowWin::SetDeviceScaleFactor(float device_scale_factor) {
     return;
   }
 
+  // SpoutBrowser: a fixed view size ignores the window DPI.
+  if (IsFixedSize()) {
+    device_scale_factor = 1.0f;
+  }
+
   if (device_scale_factor == device_scale_factor_) {
     return;
   }
@@ -251,7 +269,7 @@ void OsrWindowWin::SetDeviceScaleFactor(float device_scale_factor) {
   device_scale_factor_ = device_scale_factor;
   if (browser_) {
     browser_->GetHost()->NotifyScreenInfoChanged();
-    browser_->GetHost()->WasResized();
+    NotifyViewRectChanged();
   }
 }
 
@@ -759,9 +777,9 @@ void OsrWindowWin::OnSize() {
   // Keep |client_rect_| up to date.
   ::GetClientRect(hwnd_, &client_rect_);
 
-  if (browser_) {
-    browser_->GetHost()->WasResized();
-  }
+  // SpoutBrowser: WasResized + Invalidate, so the Spout sender gets the new
+  // size at once and does not wait for the page to paint by itself.
+  NotifyViewRectChanged();
 }
 
 void OsrWindowWin::OnFocus(bool setFocus) {
@@ -947,7 +965,7 @@ bool OsrWindowWin::GetRootScreenRect(CefRefPtr<CefBrowser> browser,
   CEF_REQUIRE_UI_THREAD();
   DCHECK_GT(device_scale_factor_, 0);
 
-  if (!settings_.real_screen_bounds) {
+  if (!settings_.real_screen_bounds || IsFixedSize()) {
     return false;
   }
 
@@ -991,6 +1009,17 @@ void OsrWindowWin::GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) {
   if (!settings_.real_screen_bounds) {
     rect.x = rect.y = 0;
   }
+
+  // SpoutBrowser: fixed view size, independent of the window.
+  if (IsFixedSize()) {
+    if (settings_.fixed_width > 0) {
+      rect.width = settings_.fixed_width;
+    }
+    if (settings_.fixed_height > 0) {
+      rect.height = settings_.fixed_height;
+    }
+    rect.x = rect.y = 0;
+  }
 }
 
 bool OsrWindowWin::GetScreenPoint(CefRefPtr<CefBrowser> browser,
@@ -1021,6 +1050,16 @@ bool OsrWindowWin::GetScreenInfo(CefRefPtr<CefBrowser> browser,
 
   if (!::IsWindow(hwnd_)) {
     return false;
+  }
+
+  if (IsFixedSize()) {
+    // SpoutBrowser: fixed view size, device_scale_factor = 1 (no DPI scaling).
+    CefRect view_rect;
+    GetViewRect(browser, view_rect);
+    screen_info.device_scale_factor = 1.0f;
+    screen_info.rect = view_rect;
+    screen_info.available_rect = view_rect;
+    return true;
   }
 
   screen_info.device_scale_factor = device_scale_factor_;
